@@ -2,11 +2,14 @@ import torch
 from torch import nn
 import logging
 import numpy as np
+from funasr.torch_utils.device_funcs import to_device
 from funasr.modules.nets_utils import make_pad_mask
 from funasr.modules.streaming_utils.utils import sequence_mask
 
+
 class CifPredictor(nn.Module):
-    def __init__(self, idim, l_order, r_order, threshold=1.0, dropout=0.1, smooth_factor=1.0, noise_threshold=0, tail_threshold=0.45):
+    def __init__(self, idim, l_order, r_order, threshold=1.0, dropout=0.1, smooth_factor=1.0, noise_threshold=0,
+                 tail_threshold=0.45):
         super(CifPredictor, self).__init__()
 
         self.pad = nn.ConstantPad1d((l_order, r_order), 0)
@@ -49,13 +52,13 @@ class CifPredictor(nn.Module):
             alphas *= (target_length / token_num)[:, None].repeat(1, alphas.size(1))
         elif self.tail_threshold > 0.0:
             hidden, alphas, token_num = self.tail_process_fn(hidden, alphas, token_num, mask=mask)
-            
+
         acoustic_embeds, cif_peak = cif(hidden, alphas, self.threshold)
-        
+
         if target_length is None and self.tail_threshold > 0.0:
             token_num_int = torch.max(token_num).type(torch.int32).item()
             acoustic_embeds = acoustic_embeds[:, :token_num_int, :]
-            
+
         return acoustic_embeds, token_num, alphas, cif_peak
 
     def tail_process_fn(self, hidden, alphas, token_num=None, mask=None):
@@ -80,7 +83,6 @@ class CifPredictor(nn.Module):
         token_num_floor = torch.floor(token_num)
 
         return hidden, alphas, token_num_floor
-
 
     def gen_frame_alignments(self,
                              alphas: torch.Tensor = None,
@@ -200,7 +202,7 @@ class CifPredictorV2(nn.Module):
         return acoustic_embeds, token_num, alphas, cif_peak
 
     def forward_chunk(self, hidden, cache=None):
-        b, t, d = hidden.size()
+        batch_size, len_time, hidden_size = hidden.shape
         h = hidden
         context = h.transpose(1, 2)
         queries = self.pad(context)
@@ -211,58 +213,80 @@ class CifPredictorV2(nn.Module):
         alphas = torch.nn.functional.relu(alphas * self.smooth_factor - self.noise_threshold)
 
         alphas = alphas.squeeze(-1)
-        mask_chunk_predictor = None
-        if cache is not None:
-            mask_chunk_predictor = None
-            mask_chunk_predictor = torch.zeros_like(alphas)
-            mask_chunk_predictor[:, cache["pad_left"]:cache["stride"] + cache["pad_left"]] = 1.0
-       
-        if mask_chunk_predictor is not None:
-            alphas = alphas * mask_chunk_predictor
-      
-        if cache is not None:
-            if cache["is_final"]:
-                alphas[:, cache["stride"] + cache["pad_left"] - 1] += 0.45
-            if cache["cif_hidden"] is not None:
-                hidden = torch.cat((cache["cif_hidden"], hidden), 1)
-            if cache["cif_alphas"] is not None:
-                alphas = torch.cat((cache["cif_alphas"], alphas), -1)
 
-        token_num = alphas.sum(-1)
-        acoustic_embeds, cif_peak = cif(hidden, alphas, self.threshold)
-        len_time = alphas.size(-1)
-        last_fire_place = len_time - 1
-        last_fire_remainds = 0.0
-        pre_alphas_length = 0
-        last_fire = False
- 
-        mask_chunk_peak_predictor = None
-        if cache is not None:
-            mask_chunk_peak_predictor = None
-            mask_chunk_peak_predictor = torch.zeros_like(cif_peak)
-            if cache["cif_alphas"] is not None:
-                pre_alphas_length = cache["cif_alphas"].size(-1)
-                mask_chunk_peak_predictor[:, :pre_alphas_length] = 1.0
-            mask_chunk_peak_predictor[:, pre_alphas_length + cache["pad_left"]:pre_alphas_length + cache["stride"] + cache["pad_left"]] = 1.0
-            
-        if mask_chunk_peak_predictor is not None:
-            cif_peak = cif_peak * mask_chunk_peak_predictor.squeeze(-1)
-        
-        for i in range(len_time):
-            if cif_peak[0][len_time - 1 - i] > self.threshold or cif_peak[0][len_time - 1 - i] == self.threshold:
-                last_fire_place = len_time - 1 - i
-                last_fire_remainds = cif_peak[0][len_time - 1 - i] - self.threshold
-                last_fire = True
-                break
-        if last_fire:
-           last_fire_remainds = torch.tensor([last_fire_remainds], dtype=alphas.dtype).to(alphas.device)
-           cache["cif_hidden"] = hidden[:, last_fire_place:, :]
-           cache["cif_alphas"] = torch.cat((last_fire_remainds.unsqueeze(0), alphas[:, last_fire_place+1:]), -1)
-        else:
-           cache["cif_hidden"] = hidden
-           cache["cif_alphas"] = alphas
-        token_num_int = token_num.floor().type(torch.int32).item()
-        return acoustic_embeds[:, 0:token_num_int, :], token_num, alphas, cif_peak
+        token_length = []
+        list_fires = []
+        list_frames = []
+        cache_alphas = []
+        cache_hiddens = []
+
+        if cache is not None and "chunk_size" in cache:
+            alphas[:, :cache["chunk_size"][0]] = 0.0
+            alphas[:, sum(cache["chunk_size"][:2]):] = 0.0
+        if cache is not None and "cif_alphas" in cache and "cif_hidden" in cache:
+            cache["cif_hidden"] = to_device(cache["cif_hidden"], device=hidden.device)
+            cache["cif_alphas"] = to_device(cache["cif_alphas"], device=alphas.device)
+            hidden = torch.cat((cache["cif_hidden"], hidden), dim=1)
+            alphas = torch.cat((cache["cif_alphas"], alphas), dim=1)
+        if cache is not None and "last_chunk" in cache and cache["last_chunk"]:
+            tail_hidden = torch.zeros((batch_size, 1, hidden_size), device=hidden.device)
+            tail_alphas = torch.tensor([[self.tail_threshold]], device=alphas.device)
+            tail_alphas = torch.tile(tail_alphas, (batch_size, 1))
+            hidden = torch.cat((hidden, tail_hidden), dim=1)
+            alphas = torch.cat((alphas, tail_alphas), dim=1)
+
+        len_time = alphas.shape[1]
+        for b in range(batch_size):
+            integrate = 0.0
+            frames = torch.zeros((hidden_size), device=hidden.device)
+            list_frame = []
+            list_fire = []
+            for t in range(len_time):
+                alpha = alphas[b][t]
+                if alpha + integrate < self.threshold:
+                    integrate += alpha
+                    list_fire.append(integrate)
+                    frames += alpha * hidden[b][t]
+                else:
+                    frames += (self.threshold - integrate) * hidden[b][t]
+                    list_frame.append(frames)
+                    integrate += alpha
+                    list_fire.append(integrate)
+                    integrate -= self.threshold
+                    frames = integrate * hidden[b][t]
+
+            cache_alphas.append(integrate)
+            if integrate > 0.0:
+                cache_hiddens.append(frames / integrate)
+            else:
+                cache_hiddens.append(frames)
+
+            token_length.append(torch.tensor(len(list_frame), device=alphas.device))
+            list_fires.append(list_fire)
+            list_frames.append(list_frame)
+
+        cache["cif_alphas"] = torch.stack(cache_alphas, axis=0)
+        cache["cif_alphas"] = torch.unsqueeze(cache["cif_alphas"], axis=0)
+        cache["cif_hidden"] = torch.stack(cache_hiddens, axis=0)
+        cache["cif_hidden"] = torch.unsqueeze(cache["cif_hidden"], axis=0)
+
+        max_token_len = max(token_length)
+        if max_token_len == 0:
+            return hidden, torch.stack(token_length, 0)
+        list_ls = []
+        for b in range(batch_size):
+            pad_frames = torch.zeros((max_token_len - token_length[b], hidden_size), device=alphas.device)
+            if token_length[b] == 0:
+                list_ls.append(pad_frames)
+            else:
+                list_frames[b] = torch.stack(list_frames[b])
+                list_ls.append(torch.cat((list_frames[b], pad_frames), dim=0))
+
+        cache["cif_alphas"] = torch.stack(cache_alphas, axis=0)
+        cache["cif_alphas"] = torch.unsqueeze(cache["cif_alphas"], axis=0)
+        cache["cif_hidden"] = torch.stack(cache_hiddens, axis=0)
+        cache["cif_hidden"] = torch.unsqueeze(cache["cif_hidden"], axis=0)
+        return torch.stack(list_ls, 0), torch.stack(token_length, 0)
 
     def tail_process_fn(self, hidden, alphas, token_num=None, mask=None):
         b, t, d = hidden.size()
@@ -339,7 +363,7 @@ class CifPredictorV2(nn.Module):
         return predictor_alignments.detach(), predictor_alignments_length.detach()
 
     def gen_tf2torch_map_dict(self):
-    
+
         tensor_name_prefix_torch = self.tf2torch_tensor_name_prefix_torch
         tensor_name_prefix_tf = self.tf2torch_tensor_name_prefix_tf
         map_dict_local = {
@@ -391,7 +415,7 @@ class CifPredictorV2(nn.Module):
                 logging.info(
                     "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_tf,
                                                                                   var_dict_tf[name_tf].shape))
-    
+
         return var_dict_torch_update
 
 
@@ -520,7 +544,7 @@ class CifPredictorV3(nn.Module):
         elif self.upsample_type == 'cnn_blstm':
             self.upsample_cnn = nn.ConvTranspose1d(idim, idim, self.upsample_times, self.upsample_times)
             self.blstm = nn.LSTM(idim, idim, 1, bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-            self.cif_output2 = nn.Linear(idim*2, 1)
+            self.cif_output2 = nn.Linear(idim * 2, 1)
         elif self.upsample_type == 'cnn_attn':
             self.upsample_cnn = nn.ConvTranspose1d(idim, idim, self.upsample_times, self.upsample_times)
             from funasr.models.encoder.transformer_encoder import EncoderLayer as TransformerEncoderLayer
@@ -528,7 +552,7 @@ class CifPredictorV3(nn.Module):
             from funasr.modules.positionwise_feed_forward import PositionwiseFeedForward
             positionwise_layer_args = (
                 idim,
-                idim*2,
+                idim * 2,
                 0.1,
             )
             self.self_attn = TransformerEncoderLayer(
@@ -538,8 +562,8 @@ class CifPredictorV3(nn.Module):
                 ),
                 PositionwiseFeedForward(*positionwise_layer_args),
                 0.1,
-                True, #normalize_before,
-                False, #concat_after,
+                True,  # normalize_before,
+                False,  # concat_after,
             )
             self.cif_output2 = nn.Linear(idim, 1)
         self.smooth_factor2 = smooth_factor2
@@ -559,14 +583,14 @@ class CifPredictorV3(nn.Module):
             _output = output
         if self.upsample_type == 'cnn':
             output2 = self.upsample_cnn(_output)
-            output2 = output2.transpose(1,2)
+            output2 = output2.transpose(1, 2)
         elif self.upsample_type == 'cnn_blstm':
             output2 = self.upsample_cnn(_output)
-            output2 = output2.transpose(1,2)
+            output2 = output2.transpose(1, 2)
             output2, (_, _) = self.blstm(output2)
         elif self.upsample_type == 'cnn_attn':
             output2 = self.upsample_cnn(_output)
-            output2 = output2.transpose(1,2)
+            output2 = output2.transpose(1, 2)
             output2, _ = self.self_attn(output2, mask)
         # import pdb; pdb.set_trace()
         alphas2 = torch.sigmoid(self.cif_output2(output2))
@@ -624,14 +648,14 @@ class CifPredictorV3(nn.Module):
             _output = output
         if self.upsample_type == 'cnn':
             output2 = self.upsample_cnn(_output)
-            output2 = output2.transpose(1,2)
+            output2 = output2.transpose(1, 2)
         elif self.upsample_type == 'cnn_blstm':
             output2 = self.upsample_cnn(_output)
-            output2 = output2.transpose(1,2)
+            output2 = output2.transpose(1, 2)
             output2, (_, _) = self.blstm(output2)
         elif self.upsample_type == 'cnn_attn':
             output2 = self.upsample_cnn(_output)
-            output2 = output2.transpose(1,2)
+            output2 = output2.transpose(1, 2)
             output2, _ = self.self_attn(output2, mask)
         alphas2 = torch.sigmoid(self.cif_output2(output2))
         alphas2 = torch.nn.functional.relu(alphas2 * self.smooth_factor2 - self.noise_threshold2)

@@ -39,14 +39,14 @@ class DecoderLayerSANM(nn.Module):
     """
 
     def __init__(
-        self,
-        size,
-        self_attn,
-        src_attn,
-        feed_forward,
-        dropout_rate,
-        normalize_before=True,
-        concat_after=False,
+            self,
+            size,
+            self_attn,
+            src_attn,
+            feed_forward,
+            dropout_rate,
+            normalize_before=True,
+            concat_after=False,
     ):
         """Construct an DecoderLayer object."""
         super(DecoderLayerSANM, self).__init__()
@@ -146,8 +146,8 @@ class DecoderLayerSANM(nn.Module):
 
             x = residual + self.dropout(self.src_attn(x, memory, memory_mask))
 
-
         return x, tgt_mask, memory, memory_mask, cache
+
 
 class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
     """
@@ -156,6 +156,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
     https://arxiv.org/abs/2006.01713
 
     """
+
     def __init__(
             self,
             vocab_size: int,
@@ -276,7 +277,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                     None,
                     None,
                     PositionwiseFeedForwardDecoderSANM(attention_dim + encoder_output_size, linear_units, dropout_rate,
-                                                      adim=attention_dim),
+                                                       adim=attention_dim),
                     dropout_rate,
                     normalize_before,
                     concat_after,
@@ -430,12 +431,12 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
         return y, new_cache
 
     def gen_tf2torch_map_dict(self):
-    
+
         tensor_name_prefix_torch = self.tf2torch_tensor_name_prefix_torch
         tensor_name_prefix_tf = self.tf2torch_tensor_name_prefix_tf
         embed_tensor_name_prefix_tf = self.embed_tensor_name_prefix_tf if self.embed_tensor_name_prefix_tf is not None else tensor_name_prefix_tf
         map_dict_local = {
-        
+
             ## decoder
             # ffn
             "{}.decoders.layeridx.norm1.weight".format(tensor_name_prefix_torch):
@@ -473,7 +474,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                  "squeeze": 0,
                  "transpose": (1, 0),
                  },  # (256,1024),(1,1024,256)
-        
+
             # fsmn
             "{}.decoders.layeridx.norm2.weight".format(tensor_name_prefix_torch):
                 {"name": "{}/decoder_fsmn_layer_layeridx/decoder_memory_block/LayerNorm/gamma".format(
@@ -570,7 +571,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                  "squeeze": 0,
                  "transpose": (1, 0),
                  },  # (256,1024),(1,1024,256)
-        
+
             # embed_concat_ffn
             "{}.embed_concat_ffn.layeridx.norm1.weight".format(tensor_name_prefix_torch):
                 {"name": "{}/cif_concat/LayerNorm/gamma".format(tensor_name_prefix_tf),
@@ -607,7 +608,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                  "squeeze": 0,
                  "transpose": (1, 0),
                  },  # (256,1024),(1,1024,256)
-        
+
             # out norm
             "{}.after_norm.weight".format(tensor_name_prefix_torch):
                 {"name": "{}/LayerNorm/gamma".format(tensor_name_prefix_tf),
@@ -619,14 +620,14 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                  "squeeze": None,
                  "transpose": None,
                  },  # (256,),(256,)
-        
+
             # in embed
             "{}.embed.0.weight".format(tensor_name_prefix_torch):
                 {"name": "{}/w_embs".format(embed_tensor_name_prefix_tf),
                  "squeeze": None,
                  "transpose": None,
                  },  # (4235,256),(4235,256)
-        
+
             # out layer
             "{}.output_layer.weight".format(tensor_name_prefix_torch):
                 {"name": ["{}/dense/kernel".format(tensor_name_prefix_tf),
@@ -640,7 +641,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                  "squeeze": [None, None],
                  "transpose": [None, None],
                  },  # (4235,),(4235,)
-        
+
         }
         return map_dict_local
 
@@ -648,7 +649,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                          var_dict_tf,
                          var_dict_torch,
                          ):
-    
+
         map_dict = self.gen_tf2torch_map_dict()
         var_dict_torch_update = dict()
         decoder_layeridx_sets = set()
@@ -678,13 +679,13 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_v,
                                                                                           var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "decoders2":
                     layeridx = int(names[2])
                     name_q = name.replace(".{}.".format(layeridx), ".layeridx.")
                     name_q = name_q.replace("decoders2", "decoders")
                     layeridx_bias = len(decoder_layeridx_sets)
-                
+
                     layeridx += layeridx_bias
                     if "decoders." in name:
                         decoder_layeridx_sets.add(layeridx)
@@ -705,11 +706,11 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_v,
                                                                                           var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "decoders3":
                     layeridx = int(names[2])
                     name_q = name.replace(".{}.".format(layeridx), ".layeridx.")
-                
+
                     layeridx_bias = 0
                     layeridx += layeridx_bias
                     if "decoders." in name:
@@ -731,7 +732,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_v,
                                                                                           var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "embed" or names[1] == "output_layer":
                     name_tf = map_dict[name]["name"]
                     if isinstance(name_tf, list):
@@ -755,7 +756,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                                                                                                    name_tf[idx_list],
                                                                                                    var_dict_tf[name_tf[
                                                                                                        idx_list]].shape))
-                
+
                     else:
                         data_tf = var_dict_tf[name_tf]
                         if map_dict[name]["squeeze"] is not None:
@@ -771,7 +772,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_tf,
                                                                                           var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "after_norm":
                     name_tf = map_dict[name]["name"]
                     data_tf = var_dict_tf[name_tf]
@@ -780,11 +781,11 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                     logging.info(
                         "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_tf,
                                                                                       var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "embed_concat_ffn":
                     layeridx = int(names[2])
                     name_q = name.replace(".{}.".format(layeridx), ".layeridx.")
-                
+
                     layeridx_bias = 0
                     layeridx += layeridx_bias
                     if "decoders." in name:
@@ -806,7 +807,7 @@ class FsmnDecoderSCAMAOpt(BaseTransformerDecoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_v,
                                                                                           var_dict_tf[name_tf].shape))
-    
+
         return var_dict_torch_update
 
 
@@ -816,27 +817,28 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
     Paraformer: Fast and Accurate Parallel Transformer for Non-autoregressive End-to-End Speech Recognition
     https://arxiv.org/abs/2006.01713
     """
+
     def __init__(
-        self,
-        vocab_size: int,
-        encoder_output_size: int,
-        attention_heads: int = 4,
-        linear_units: int = 2048,
-        num_blocks: int = 6,
-        dropout_rate: float = 0.1,
-        positional_dropout_rate: float = 0.1,
-        self_attention_dropout_rate: float = 0.0,
-        src_attention_dropout_rate: float = 0.0,
-        input_layer: str = "embed",
-        use_output_layer: bool = True,
-        pos_enc_class=PositionalEncoding,
-        normalize_before: bool = True,
-        concat_after: bool = False,
-        att_layer_num: int = 6,
-        kernel_size: int = 21,
-        sanm_shfit: int = 0,
-        tf2torch_tensor_name_prefix_torch: str = "decoder",
-        tf2torch_tensor_name_prefix_tf: str = "seq2seq/decoder",
+            self,
+            vocab_size: int,
+            encoder_output_size: int,
+            attention_heads: int = 4,
+            linear_units: int = 2048,
+            num_blocks: int = 6,
+            dropout_rate: float = 0.1,
+            positional_dropout_rate: float = 0.1,
+            self_attention_dropout_rate: float = 0.0,
+            src_attention_dropout_rate: float = 0.0,
+            input_layer: str = "embed",
+            use_output_layer: bool = True,
+            pos_enc_class=PositionalEncoding,
+            normalize_before: bool = True,
+            concat_after: bool = False,
+            att_layer_num: int = 6,
+            kernel_size: int = 21,
+            sanm_shfit: int = 0,
+            tf2torch_tensor_name_prefix_torch: str = "decoder",
+            tf2torch_tensor_name_prefix_tf: str = "seq2seq/decoder",
     ):
         assert check_argument_types()
         super().__init__(
@@ -930,11 +932,11 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
         self.tf2torch_tensor_name_prefix_tf = tf2torch_tensor_name_prefix_tf
 
     def forward(
-        self,
-        hs_pad: torch.Tensor,
-        hlens: torch.Tensor,
-        ys_in_pad: torch.Tensor,
-        ys_in_lens: torch.Tensor,
+            self,
+            hs_pad: torch.Tensor,
+            hlens: torch.Tensor,
+            ys_in_pad: torch.Tensor,
+            ys_in_lens: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward decoder.
 
@@ -987,10 +989,10 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
         return logp.squeeze(0), state
 
     def forward_chunk(
-        self,
-        memory: torch.Tensor,
-        tgt: torch.Tensor,
-        cache: dict = None,
+            self,
+            memory: torch.Tensor,
+            tgt: torch.Tensor,
+            cache: dict = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward decoder.
 
@@ -1034,7 +1036,6 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                 new_cache[j] = c_ret
 
         for decoder in self.decoders3:
-
             x, tgt_mask, memory, memory_mask, _ = decoder.forward_chunk(
                 x, None, memory, None, cache=None
             )
@@ -1046,11 +1047,11 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
         return x
 
     def forward_one_step(
-        self,
-        tgt: torch.Tensor,
-        tgt_mask: torch.Tensor,
-        memory: torch.Tensor,
-        cache: List[torch.Tensor] = None,
+            self,
+            tgt: torch.Tensor,
+            tgt_mask: torch.Tensor,
+            memory: torch.Tensor,
+            cache: List[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         """Forward one step.
 
@@ -1092,7 +1093,6 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                 new_cache.append(c_ret)
 
         for decoder in self.decoders3:
-
             x, tgt_mask, memory, memory_mask, _ = decoder.forward_chunk(
                 x, tgt_mask, memory, None, cache=None
             )
@@ -1107,11 +1107,11 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
         return y, new_cache
 
     def gen_tf2torch_map_dict(self):
-    
+
         tensor_name_prefix_torch = self.tf2torch_tensor_name_prefix_torch
         tensor_name_prefix_tf = self.tf2torch_tensor_name_prefix_tf
         map_dict_local = {
-        
+
             ## decoder
             # ffn
             "{}.decoders.layeridx.norm1.weight".format(tensor_name_prefix_torch):
@@ -1149,7 +1149,7 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                  "squeeze": 0,
                  "transpose": (1, 0),
                  },  # (256,1024),(1,1024,256)
-        
+
             # fsmn
             "{}.decoders.layeridx.norm2.weight".format(tensor_name_prefix_torch):
                 {"name": "{}/decoder_fsmn_layer_layeridx/decoder_memory_block/LayerNorm/gamma".format(
@@ -1246,7 +1246,7 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                  "squeeze": 0,
                  "transpose": (1, 0),
                  },  # (256,1024),(1,1024,256)
-        
+
             # embed_concat_ffn
             "{}.embed_concat_ffn.layeridx.norm1.weight".format(tensor_name_prefix_torch):
                 {"name": "{}/cif_concat/LayerNorm/gamma".format(tensor_name_prefix_tf),
@@ -1283,7 +1283,7 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                  "squeeze": 0,
                  "transpose": (1, 0),
                  },  # (256,1024),(1,1024,256)
-        
+
             # out norm
             "{}.after_norm.weight".format(tensor_name_prefix_torch):
                 {"name": "{}/LayerNorm/gamma".format(tensor_name_prefix_tf),
@@ -1295,14 +1295,14 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                  "squeeze": None,
                  "transpose": None,
                  },  # (256,),(256,)
-        
+
             # in embed
             "{}.embed.0.weight".format(tensor_name_prefix_torch):
                 {"name": "{}/w_embs".format(tensor_name_prefix_tf),
                  "squeeze": None,
                  "transpose": None,
                  },  # (4235,256),(4235,256)
-        
+
             # out layer
             "{}.output_layer.weight".format(tensor_name_prefix_torch):
                 {"name": ["{}/dense/kernel".format(tensor_name_prefix_tf), "{}/w_embs".format(tensor_name_prefix_tf)],
@@ -1315,7 +1315,7 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                  "squeeze": [None, None],
                  "transpose": [None, None],
                  },  # (4235,),(4235,)
-        
+
         }
         return map_dict_local
 
@@ -1352,13 +1352,13 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_v,
                                                                                           var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "decoders2":
                     layeridx = int(names[2])
                     name_q = name.replace(".{}.".format(layeridx), ".layeridx.")
                     name_q = name_q.replace("decoders2", "decoders")
                     layeridx_bias = len(decoder_layeridx_sets)
-                
+
                     layeridx += layeridx_bias
                     if "decoders." in name:
                         decoder_layeridx_sets.add(layeridx)
@@ -1379,11 +1379,11 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_v,
                                                                                           var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "decoders3":
                     layeridx = int(names[2])
                     name_q = name.replace(".{}.".format(layeridx), ".layeridx.")
-                
+
                     layeridx_bias = 0
                     layeridx += layeridx_bias
                     if "decoders." in name:
@@ -1405,7 +1405,7 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_v,
                                                                                           var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "embed" or names[1] == "output_layer":
                     name_tf = map_dict[name]["name"]
                     if isinstance(name_tf, list):
@@ -1429,7 +1429,7 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                                                                                                    name_tf[idx_list],
                                                                                                    var_dict_tf[name_tf[
                                                                                                        idx_list]].shape))
-                
+
                     else:
                         data_tf = var_dict_tf[name_tf]
                         if map_dict[name]["squeeze"] is not None:
@@ -1445,7 +1445,7 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_tf,
                                                                                           var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "after_norm":
                     name_tf = map_dict[name]["name"]
                     data_tf = var_dict_tf[name_tf]
@@ -1454,11 +1454,11 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                     logging.info(
                         "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_tf,
                                                                                       var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "embed_concat_ffn":
                     layeridx = int(names[2])
                     name_q = name.replace(".{}.".format(layeridx), ".layeridx.")
-                
+
                     layeridx_bias = 0
                     layeridx += layeridx_bias
                     if "decoders." in name:
@@ -1480,5 +1480,5 @@ class ParaformerSANMDecoder(BaseTransformerDecoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_v,
                                                                                           var_dict_tf[name_tf].shape))
-    
+
         return var_dict_torch_update

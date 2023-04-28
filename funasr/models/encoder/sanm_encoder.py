@@ -6,9 +6,11 @@ from typing import Union
 import logging
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from funasr.modules.streaming_utils.chunk_utilis import overlap_chunk
 from typeguard import check_argument_types
 import numpy as np
+from funasr.torch_utils.device_funcs import to_device
 from funasr.modules.nets_utils import make_pad_mask
 from funasr.modules.attention import MultiHeadedAttention, MultiHeadedAttentionSANM, MultiHeadedAttentionSANMwithMask
 from funasr.modules.embedding import SinusoidalPositionEncoder, StreamSinusoidalPositionEncoder
@@ -29,17 +31,18 @@ from funasr.models.ctc import CTC
 from funasr.models.encoder.abs_encoder import AbsEncoder
 from funasr.modules.mask import subsequent_mask, vad_mask
 
+
 class EncoderLayerSANM(nn.Module):
     def __init__(
-        self,
-        in_size,
-        size,
-        self_attn,
-        feed_forward,
-        dropout_rate,
-        normalize_before=True,
-        concat_after=False,
-        stochastic_depth_rate=0.0,
+            self,
+            in_size,
+            size,
+            self_attn,
+            feed_forward,
+            dropout_rate,
+            normalize_before=True,
+            concat_after=False,
+            stochastic_depth_rate=0.0,
     ):
         """Construct an EncoderLayer object."""
         super(EncoderLayerSANM, self).__init__()
@@ -88,7 +91,8 @@ class EncoderLayerSANM(nn.Module):
             x = self.norm1(x)
 
         if self.concat_after:
-            x_concat = torch.cat((x, self.self_attn(x, mask, mask_shfit_chunk=mask_shfit_chunk, mask_att_chunk_encoder=mask_att_chunk_encoder)), dim=-1)
+            x_concat = torch.cat((x, self.self_attn(x, mask, mask_shfit_chunk=mask_shfit_chunk,
+                                                    mask_att_chunk_encoder=mask_att_chunk_encoder)), dim=-1)
             if self.in_size == self.size:
                 x = residual + stoch_layer_coeff * self.concat_linear(x_concat)
             else:
@@ -96,11 +100,13 @@ class EncoderLayerSANM(nn.Module):
         else:
             if self.in_size == self.size:
                 x = residual + stoch_layer_coeff * self.dropout(
-                    self.self_attn(x, mask, mask_shfit_chunk=mask_shfit_chunk, mask_att_chunk_encoder=mask_att_chunk_encoder)
+                    self.self_attn(x, mask, mask_shfit_chunk=mask_shfit_chunk,
+                                   mask_att_chunk_encoder=mask_att_chunk_encoder)
                 )
             else:
                 x = stoch_layer_coeff * self.dropout(
-                    self.self_attn(x, mask, mask_shfit_chunk=mask_shfit_chunk, mask_att_chunk_encoder=mask_att_chunk_encoder)
+                    self.self_attn(x, mask, mask_shfit_chunk=mask_shfit_chunk,
+                                   mask_att_chunk_encoder=mask_att_chunk_encoder)
                 )
         if not self.normalize_before:
             x = self.norm1(x)
@@ -112,8 +118,8 @@ class EncoderLayerSANM(nn.Module):
         if not self.normalize_before:
             x = self.norm2(x)
 
-
         return x, mask, cache, mask_shfit_chunk, mask_att_chunk_encoder
+
 
 class SANMEncoder(AbsEncoder):
     """
@@ -124,29 +130,29 @@ class SANMEncoder(AbsEncoder):
     """
 
     def __init__(
-        self,
-        input_size: int,
-        output_size: int = 256,
-        attention_heads: int = 4,
-        linear_units: int = 2048,
-        num_blocks: int = 6,
-        dropout_rate: float = 0.1,
-        positional_dropout_rate: float = 0.1,
-        attention_dropout_rate: float = 0.0,
-        input_layer: Optional[str] = "conv2d",
-        pos_enc_class=SinusoidalPositionEncoder,
-        normalize_before: bool = True,
-        concat_after: bool = False,
-        positionwise_layer_type: str = "linear",
-        positionwise_conv_kernel_size: int = 1,
-        padding_idx: int = -1,
-        interctc_layer_idx: List[int] = [],
-        interctc_use_conditioning: bool = False,
-        kernel_size : int = 11,
-        sanm_shfit : int = 0,
-        selfattention_layer_type: str = "sanm",
-        tf2torch_tensor_name_prefix_torch: str = "encoder",
-        tf2torch_tensor_name_prefix_tf: str = "seq2seq/encoder",
+            self,
+            input_size: int,
+            output_size: int = 256,
+            attention_heads: int = 4,
+            linear_units: int = 2048,
+            num_blocks: int = 6,
+            dropout_rate: float = 0.1,
+            positional_dropout_rate: float = 0.1,
+            attention_dropout_rate: float = 0.0,
+            input_layer: Optional[str] = "conv2d",
+            pos_enc_class=SinusoidalPositionEncoder,
+            normalize_before: bool = True,
+            concat_after: bool = False,
+            positionwise_layer_type: str = "linear",
+            positionwise_conv_kernel_size: int = 1,
+            padding_idx: int = -1,
+            interctc_layer_idx: List[int] = [],
+            interctc_use_conditioning: bool = False,
+            kernel_size: int = 11,
+            sanm_shfit: int = 0,
+            selfattention_layer_type: str = "sanm",
+            tf2torch_tensor_name_prefix_torch: str = "encoder",
+            tf2torch_tensor_name_prefix_tf: str = "seq2seq/encoder",
     ):
         assert check_argument_types()
         super().__init__()
@@ -252,7 +258,7 @@ class SANMEncoder(AbsEncoder):
         )
 
         self.encoders = repeat(
-            num_blocks-1,
+            num_blocks - 1,
             lambda lnum: EncoderLayerSANM(
                 output_size,
                 output_size,
@@ -279,11 +285,11 @@ class SANMEncoder(AbsEncoder):
         return self._output_size
 
     def forward(
-        self,
-        xs_pad: torch.Tensor,
-        ilens: torch.Tensor,
-        prev_states: torch.Tensor = None,
-        ctc: CTC = None,
+            self,
+            xs_pad: torch.Tensor,
+            ilens: torch.Tensor,
+            prev_states: torch.Tensor = None,
+            ctc: CTC = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """Embed positions in tensor.
 
@@ -295,14 +301,14 @@ class SANMEncoder(AbsEncoder):
             position embedded tensor and mask
         """
         masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device)
-        xs_pad = xs_pad * self.output_size()**0.5
+        xs_pad = xs_pad * self.output_size() ** 0.5
         if self.embed is None:
             xs_pad = xs_pad
         elif (
-            isinstance(self.embed, Conv2dSubsampling)
-            or isinstance(self.embed, Conv2dSubsampling2)
-            or isinstance(self.embed, Conv2dSubsampling6)
-            or isinstance(self.embed, Conv2dSubsampling8)
+                isinstance(self.embed, Conv2dSubsampling)
+                or isinstance(self.embed, Conv2dSubsampling2)
+                or isinstance(self.embed, Conv2dSubsampling6)
+                or isinstance(self.embed, Conv2dSubsampling8)
         ):
             short_status, limit_size = check_short_utt(self.embed, xs_pad.size(1))
             if short_status:
@@ -349,6 +355,23 @@ class SANMEncoder(AbsEncoder):
             return (xs_pad, intermediate_outs), olens, None
         return xs_pad, olens, None
 
+    def _add_overlap_chunk(self, feats: np.ndarray, cache: dict = {}):
+        if len(cache) == 0:
+            return feats
+        # process last chunk
+        cache["feats"] = to_device(cache["feats"], device=feats.device)
+        overlap_feats = torch.cat((cache["feats"], feats), dim=1)
+        if cache["is_final"]:
+            cache["feats"] = overlap_feats[:, -cache["chunk_size"][0]:, :]
+            if not cache["last_chunk"]:
+                padding_length = sum(cache["chunk_size"]) - overlap_feats.shape[1]
+                overlap_feats = overlap_feats.transpose(1, 2)
+                overlap_feats = F.pad(overlap_feats, (0, padding_length))
+                overlap_feats = overlap_feats.transpose(1, 2)
+        else:
+            cache["feats"] = overlap_feats[:, -(cache["chunk_size"][0] + cache["chunk_size"][2]):, :]
+        return overlap_feats
+
     def forward_chunk(self,
                       xs_pad: torch.Tensor,
                       ilens: torch.Tensor,
@@ -360,7 +383,10 @@ class SANMEncoder(AbsEncoder):
             xs_pad = xs_pad
         else:
             xs_pad = self.embed(xs_pad, cache)
-
+        if cache["tail_chunk"]:
+            xs_pad = to_device(cache["feats"], device=xs_pad.device)
+        else:
+            xs_pad = self._add_overlap_chunk(xs_pad, cache)
         encoder_outs = self.encoders0(xs_pad, None, None, None, None)
         xs_pad, masks = encoder_outs[0], encoder_outs[1]
         intermediate_outs = []
@@ -474,18 +500,18 @@ class SANMEncoder(AbsEncoder):
                  "squeeze": None,
                  "transpose": None,
                  },  # (256,),(256,)
-        
+
         }
-    
+
         return map_dict_local
 
     def convert_tf2torch(self,
                          var_dict_tf,
                          var_dict_torch,
                          ):
-        
+
         map_dict = self.gen_tf2torch_map_dict()
-    
+
         var_dict_torch_update = dict()
         for name in sorted(var_dict_torch.keys(), reverse=False):
             names = name.split('.')
@@ -493,7 +519,7 @@ class SANMEncoder(AbsEncoder):
                 if names[1] == "encoders0":
                     layeridx = int(names[2])
                     name_q = name.replace(".{}.".format(layeridx), ".layeridx.")
-                
+
                     name_q = name_q.replace("encoders0", "encoders")
                     layeridx_bias = 0
                     layeridx += layeridx_bias
@@ -536,7 +562,7 @@ class SANMEncoder(AbsEncoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_v,
                                                                                           var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "after_norm":
                     name_tf = map_dict[name]["name"]
                     data_tf = var_dict_tf[name_tf]
@@ -545,7 +571,7 @@ class SANMEncoder(AbsEncoder):
                     logging.info(
                         "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_tf,
                                                                                       var_dict_tf[name_tf].shape))
-    
+
         return var_dict_torch_update
 
 
@@ -887,18 +913,18 @@ class SANMEncoderChunkOpt(AbsEncoder):
                  "squeeze": None,
                  "transpose": None,
                  },  # (256,),(256,)
-        
+
         }
-    
+
         return map_dict_local
 
     def convert_tf2torch(self,
                          var_dict_tf,
                          var_dict_torch,
                          ):
-    
+
         map_dict = self.gen_tf2torch_map_dict()
-    
+
         var_dict_torch_update = dict()
         for name in sorted(var_dict_torch.keys(), reverse=False):
             names = name.split('.')
@@ -906,7 +932,7 @@ class SANMEncoderChunkOpt(AbsEncoder):
                 if names[1] == "encoders0":
                     layeridx = int(names[2])
                     name_q = name.replace(".{}.".format(layeridx), ".layeridx.")
-                
+
                     name_q = name_q.replace("encoders0", "encoders")
                     layeridx_bias = 0
                     layeridx += layeridx_bias
@@ -949,7 +975,7 @@ class SANMEncoderChunkOpt(AbsEncoder):
                         logging.info(
                             "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_v,
                                                                                           var_dict_tf[name_tf].shape))
-            
+
                 elif names[1] == "after_norm":
                     name_tf = map_dict[name]["name"]
                     data_tf = var_dict_tf[name_tf]
@@ -958,7 +984,7 @@ class SANMEncoderChunkOpt(AbsEncoder):
                     logging.info(
                         "torch tensor: {}, {}, loading from tf tensor: {}, {}".format(name, data_tf.size(), name_tf,
                                                                                       var_dict_tf[name_tf].shape))
-    
+
         return var_dict_torch_update
 
 
@@ -969,27 +995,27 @@ class SANMVadEncoder(AbsEncoder):
     """
 
     def __init__(
-        self,
-        input_size: int,
-        output_size: int = 256,
-        attention_heads: int = 4,
-        linear_units: int = 2048,
-        num_blocks: int = 6,
-        dropout_rate: float = 0.1,
-        positional_dropout_rate: float = 0.1,
-        attention_dropout_rate: float = 0.0,
-        input_layer: Optional[str] = "conv2d",
-        pos_enc_class=SinusoidalPositionEncoder,
-        normalize_before: bool = True,
-        concat_after: bool = False,
-        positionwise_layer_type: str = "linear",
-        positionwise_conv_kernel_size: int = 1,
-        padding_idx: int = -1,
-        interctc_layer_idx: List[int] = [],
-        interctc_use_conditioning: bool = False,
-        kernel_size : int = 11,
-        sanm_shfit : int = 0,
-        selfattention_layer_type: str = "sanm",
+            self,
+            input_size: int,
+            output_size: int = 256,
+            attention_heads: int = 4,
+            linear_units: int = 2048,
+            num_blocks: int = 6,
+            dropout_rate: float = 0.1,
+            positional_dropout_rate: float = 0.1,
+            attention_dropout_rate: float = 0.0,
+            input_layer: Optional[str] = "conv2d",
+            pos_enc_class=SinusoidalPositionEncoder,
+            normalize_before: bool = True,
+            concat_after: bool = False,
+            positionwise_layer_type: str = "linear",
+            positionwise_conv_kernel_size: int = 1,
+            padding_idx: int = -1,
+            interctc_layer_idx: List[int] = [],
+            interctc_use_conditioning: bool = False,
+            kernel_size: int = 11,
+            sanm_shfit: int = 0,
+            selfattention_layer_type: str = "sanm",
     ):
         assert check_argument_types()
         super().__init__()
@@ -1094,7 +1120,7 @@ class SANMVadEncoder(AbsEncoder):
         )
 
         self.encoders = repeat(
-            num_blocks-1,
+            num_blocks - 1,
             lambda lnum: EncoderLayerSANM(
                 output_size,
                 output_size,
@@ -1119,12 +1145,12 @@ class SANMVadEncoder(AbsEncoder):
         return self._output_size
 
     def forward(
-        self,
-        xs_pad: torch.Tensor,
-        ilens: torch.Tensor,
-        vad_indexes: torch.Tensor,
-        prev_states: torch.Tensor = None,
-        ctc: CTC = None,
+            self,
+            xs_pad: torch.Tensor,
+            ilens: torch.Tensor,
+            vad_indexes: torch.Tensor,
+            prev_states: torch.Tensor = None,
+            ctc: CTC = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """Embed positions in tensor.
 
@@ -1138,7 +1164,7 @@ class SANMVadEncoder(AbsEncoder):
         masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device)
         sub_masks = subsequent_mask(masks.size(-1), device=xs_pad.device).unsqueeze(0)
         no_future_masks = masks & sub_masks
-        xs_pad *= self.output_size()**0.5
+        xs_pad *= self.output_size() ** 0.5
         if self.embed is None:
             xs_pad = xs_pad
         elif (isinstance(self.embed, Conv2dSubsampling) or isinstance(self.embed, Conv2dSubsampling2)
@@ -1161,25 +1187,24 @@ class SANMVadEncoder(AbsEncoder):
         xs_pad, _ = encoder_outs[0], encoder_outs[1]
         intermediate_outs = []
 
-
         for layer_idx, encoder_layer in enumerate(self.encoders):
-                if layer_idx + 1 == len(self.encoders):
-                    # This is last layer.
-                    coner_mask = torch.ones(masks.size(0),
-                                            masks.size(-1),
-                                            masks.size(-1),
-                                            device=xs_pad.device,
-                                            dtype=torch.bool)
-                    for word_index, length in enumerate(ilens):
-                        coner_mask[word_index, :, :] = vad_mask(masks.size(-1),
-                                                                vad_indexes[word_index],
-                                                                device=xs_pad.device)
-                    layer_mask = masks & coner_mask
-                else:
-                    layer_mask = no_future_masks
-                mask_tup1 = [masks, layer_mask]
-                encoder_outs = encoder_layer(xs_pad, mask_tup1)
-                xs_pad, layer_mask = encoder_outs[0], encoder_outs[1]
+            if layer_idx + 1 == len(self.encoders):
+                # This is last layer.
+                coner_mask = torch.ones(masks.size(0),
+                                        masks.size(-1),
+                                        masks.size(-1),
+                                        device=xs_pad.device,
+                                        dtype=torch.bool)
+                for word_index, length in enumerate(ilens):
+                    coner_mask[word_index, :, :] = vad_mask(masks.size(-1),
+                                                            vad_indexes[word_index],
+                                                            device=xs_pad.device)
+                layer_mask = masks & coner_mask
+            else:
+                layer_mask = no_future_masks
+            mask_tup1 = [masks, layer_mask]
+            encoder_outs = encoder_layer(xs_pad, mask_tup1)
+            xs_pad, layer_mask = encoder_outs[0], encoder_outs[1]
 
         if self.normalize_before:
             xs_pad = self.after_norm(xs_pad)
