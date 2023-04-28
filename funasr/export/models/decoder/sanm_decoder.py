@@ -1,4 +1,5 @@
 import os
+from typing import List
 
 import torch
 import torch.nn as nn
@@ -72,6 +73,7 @@ class ParaformerSANMDecoder(nn.Module):
         hlens: torch.Tensor,
         ys_in_pad: torch.Tensor,
         ys_in_lens: torch.Tensor,
+        cache: torch.Tensor = None
     ):
 
         tgt = ys_in_pad
@@ -86,38 +88,76 @@ class ParaformerSANMDecoder(nn.Module):
 
         x = tgt
         x, tgt_mask, memory, memory_mask, _ = self.model.decoders(
-            x, tgt_mask, memory, memory_mask
+            x, tgt_mask, memory, memory_mask, cache
         )
         if self.model.decoders2 is not None:
             x, tgt_mask, memory, memory_mask, _ = self.model.decoders2(
-                x, tgt_mask, memory, memory_mask
+                x, tgt_mask, memory, memory_mask, cache
             )
         x, tgt_mask, memory, memory_mask, _ = self.model.decoders3(
-            x, tgt_mask, memory, memory_mask
+            x, tgt_mask, memory, memory_mask, cache
         )
         x = self.after_norm(x)
         x = self.output_layer(x)
 
         return x, ys_in_lens
 
+    def forward_chunk(self,
+            memory: torch.Tensor,
+            tgt: torch.Tensor,
+            in_cache: List[torch.Tensor] = None,
+    ):
+        """Compute decoded features.
+
+        Args:
+            tgt (torch.Tensor): Input tensor (#batch, maxlen_out, size).
+            memory (torch.Tensor): Encoded memory, float32 (#batch, maxlen_in, size).
+            cache (List[torch.Tensor]): List of cached tensors.
+                Each tensor shape should be (#batch, maxlen_out - 1, size).
+
+        Returns:
+            torch.Tensor: Output tensor(#batch, maxlen_out, size).
+            torch.Tensor: Mask for output tensor (#batch, maxlen_out).
+            torch.Tensor: Encoded memory (#batch, maxlen_in, size).
+            torch.Tensor: Encoded memory mask (#batch, maxlen_in).
+
+        """
+        x = tgt
+
+        for i, decoder in enumerate(self.model.decoders):
+            x, tgt_mask, memory, memory_mask, c_ret = decoder(
+                x, None, memory, None, cache=in_cache[i]
+            )
+            in_cache[i] = c_ret
+
+        for decoder in self.model.decoders3:
+            x, tgt_mask, memory, memory_mask, _ = decoder(
+                x, None, memory, None, cache=None
+            )
+
+        x = self.after_norm(x)
+        if self.output_layer is not None:
+            x = self.output_layer(x)
+
+        return x, memory, in_cache
+
 
     def get_dummy_inputs(self, enc_size):
         tgt = torch.LongTensor([0]).unsqueeze(0)
         memory = torch.randn(1, 100, enc_size)
-        pre_acoustic_embeds = torch.randn(1, 1, enc_size)
-        cache_num = len(self.model.decoders) + len(self.model.decoders2)
+        cache_num = len(self.model.model.decoders) + len(self.model.decoders2)
         cache = [
             torch.zeros((1, self.model.decoders[0].size, self.model.decoders[0].self_attn.kernel_size))
             for _ in range(cache_num)
         ]
-        return (tgt, memory, pre_acoustic_embeds, cache)
+        return (memory, tgt, cache)
 
     def is_optimizable(self):
         return True
 
     def get_input_names(self):
         cache_num = len(self.model.decoders) + len(self.model.decoders2)
-        return ['tgt', 'memory', 'pre_acoustic_embeds'] \
+        return ['tgt', 'memory'] \
                + ['cache_%d' % i for i in range(cache_num)]
 
     def get_output_names(self):
@@ -134,13 +174,9 @@ class ParaformerSANMDecoder(nn.Module):
             'memory': {
                 0: 'memory_batch',
                 1: 'memory_length'
-            },
-            'pre_acoustic_embeds': {
-                0: 'acoustic_embeds_batch',
-                1: 'acoustic_embeds_length',
             }
         }
-        cache_num = len(self.model.decoders) + len(self.model.decoders2)
+        cache_num = len(self.model.decoders)
         ret.update({
             'cache_%d' % d: {
                 0: 'cache_%d_batch' % d,

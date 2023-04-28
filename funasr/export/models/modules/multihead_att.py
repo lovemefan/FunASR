@@ -19,7 +19,10 @@ class MultiHeadedAttentionSANM(nn.Module):
         self.all_head_size = self.h * self.d_k
 
     def forward(self, x, mask):
-        mask_3d_btd, mask_4d_bhlt = mask
+        if mask is not None:
+            mask_3d_btd, mask_4d_bhlt = mask
+        else:
+            mask_3d_btd, mask_4d_bhlt = None, None
         q_h, k_h, v_h, v = self.forward_qkv(x)
         fsmn_memory = self.forward_fsmn(v, mask_3d_btd)
         q_h = q_h * self.d_k**(-0.5)
@@ -43,17 +46,20 @@ class MultiHeadedAttentionSANM(nn.Module):
     def forward_fsmn(self, inputs, mask):
         # b, t, d = inputs.size()
         # mask = torch.reshape(mask, (b, -1, 1))
-        inputs = inputs * mask
+        if mask is not None:
+            inputs = inputs * mask
         x = inputs.transpose(1, 2)
         x = self.pad_fn(x)
         x = self.fsmn_block(x)
         x = x.transpose(1, 2)
         x = x + inputs
-        x = x * mask
+        if mask is not None:
+            x = x * mask
         return x
 
     def forward_attention(self, value, scores, mask):
-        scores = scores + mask
+        if mask is not None:
+            scores = scores + mask
 
         self.attn = torch.softmax(scores, dim=-1)
         context_layer = torch.matmul(self.attn, value)  # (batch, head, time1, d_k)
@@ -65,7 +71,8 @@ class MultiHeadedAttentionSANM(nn.Module):
 
 
 def preprocess_for_attn(x, mask, cache, pad_fn):
-    x = x * mask
+    if mask is not None:
+        x = x * mask
     x = x.transpose(1, 2)
     if cache is None:
         x = pad_fn(x)
@@ -95,7 +102,8 @@ class MultiHeadedAttentionSANMDecoder(nn.Module):
         x = x.transpose(1, 2)
 
         x = x + inputs
-        x = x * mask
+        if mask is not None:
+            x = x * mask
         return x, cache
 
 
@@ -131,7 +139,8 @@ class MultiHeadedAttentionCrossAtt(nn.Module):
         return q, k, v
 
     def forward_attention(self, value, scores, mask):
-        scores = scores + mask
+        if mask is not None:
+            scores = scores + mask
 
         self.attn = torch.softmax(scores, dim=-1)
         context_layer = torch.matmul(self.attn, value)  # (batch, head, time1, d_k)
@@ -174,7 +183,8 @@ class OnnxMultiHeadedAttention(nn.Module):
         return q, k, v
     
     def forward_attention(self, value, scores, mask):
-        scores = scores + mask
+        if mask is not None:
+            scores = scores + mask
 
         self.attn = torch.softmax(scores, dim=-1)
         context_layer = torch.matmul(self.attn, value)  # (batch, head, time1, d_k)
@@ -231,7 +241,8 @@ class OnnxRelPosMultiHeadedAttention(OnnxMultiHeadedAttention):
         return x
 
     def forward_attention(self, value, scores, mask):
-        scores = scores + mask
+        if mask is not None:
+            scores = scores + mask
 
         self.attn = torch.softmax(scores, dim=-1)
         context_layer = torch.matmul(self.attn, value)  # (batch, head, time1, d_k)

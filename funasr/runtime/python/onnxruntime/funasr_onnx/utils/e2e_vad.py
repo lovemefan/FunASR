@@ -466,7 +466,7 @@ class E2EVadModel():
             if len(self.output_data_buf) > 0:
                 for i in range(self.output_data_buf_offset, len(self.output_data_buf)):
                     if online:
-                        if not self.output_data_buf[i].contain_seg_start_point:
+                        if not is_final and not self.output_data_buf[i].contain_seg_start_point:
                             continue
                         if not self.next_seg and not self.output_data_buf[i].contain_seg_end_point:
                             continue
