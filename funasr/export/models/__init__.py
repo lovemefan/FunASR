@@ -1,4 +1,5 @@
-from funasr.models.e2e_asr_paraformer import Paraformer, BiCifParaformer
+from funasr.export.models.e2e_online_asr_paraformer import ParaformerOnline as ParaformerOnline_export
+from funasr.models.e2e_asr_paraformer import Paraformer, BiCifParaformer, ParaformerOnline
 from funasr.export.models.e2e_asr_paraformer import Paraformer as Paraformer_export
 from funasr.export.models.e2e_asr_paraformer import BiCifParaformer as BiCifParaformer_export
 from funasr.models.e2e_vad import E2EVadModel
@@ -12,6 +13,8 @@ from funasr.export.models.CT_Transformer import CT_Transformer_VadRealtime as CT
 def get_model(model, export_config=None):
     if isinstance(model, BiCifParaformer):
         return BiCifParaformer_export(model, **export_config)
+    elif isinstance(model, ParaformerOnline):
+        return ParaformerOnline_export(model, **export_config)
     elif isinstance(model, Paraformer):
         return Paraformer_export(model, **export_config)
     elif isinstance(model, E2EVadModel):
