@@ -53,6 +53,8 @@ class Paraformer():
         self.ort_infer = OrtInferSession(model_file, device_id, intra_op_num_threads=intra_op_num_threads)
         self.batch_size = batch_size
         self.plot_timestamp_to = plot_timestamp_to
+        self.decoder_conf = config["decoder_conf"]
+        self.encoder_conf = config["encoder_conf"]
         if "predictor_bias" in config['model_conf'].keys():
             self.pred_bias = config['model_conf']['predictor_bias']
         else:
